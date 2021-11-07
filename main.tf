@@ -1,56 +1,115 @@
 provider "aws" {
     region= "eu-west-3"
 }
-
-variable "cidr_blocks" {
-    description = "subnet and vpc cidr blocks"
-    type = list(object ({
-        cidr_block = string
-        name = string
- 
-    }))
-}
-
-variable "environment" {
-    description = "deployment environment"
-
-} 
-
+variable vpc_cidr_block {}
+variable subnet_cidr_block {}
+variable env_prefix {} 
 variable avail_zone {}
+variable my_ip { }
+variable instance_type { }
 
-resource "aws_vpc" "development-vpc" {
-    cidr_block = var.cidr_blocks[0].cidr_block
+resource "aws_vpc" "myaapp-vpc" {
+    cidr_block = var.vpc_cidr_block
     tags = {
-        Name: var.cidr_blocks[0].name
-        pvc_env: "dev"
+        Name: "${var.env_prefix}-vpc"
+ 
     }
 }
-resource "aws_subnet" "dev-subnet-1" {
-    vpc_id = aws_vpc.development-vpc.id
-    cidr_block = var.cidr_blocks[1].cidr_block
+resource "aws_subnet" "myapp-subnet-1" {
+    vpc_id = aws_vpc.myaapp-vpc.id
+    cidr_block = var.subnet_cidr_block
     availability_zone = var.avail_zone
     tags = {
-        Name: "subnet-1-dev"
+        Name: "${var.env_prefix}-subnet-1"
     }
 }
-data "aws_vpc" "existing_vpc"{
-    default = true
-}
-
-resource "aws_subnet" "dev-subnet-2" {
-    vpc_id = data.aws_vpc.existing_vpc.id
-    cidr_block = "172.31.20.0/24"
-    availability_zone = var.avail_zone
+resource "aws_route_table" "myapp-route-table" {
+    vpc_id = aws_vpc.myaapp-vpc.id
+    route {
+      cidr_block = "0.0.0.0/0"
+      gateway_id = aws_internet_gateway.myapp-igw.id
+    } 
     tags = {
-        Name: "subnet-2-dev"
+      "Name" = "${var.env_prefix}-rtb"
     }
     
 }
+resource "aws_internet_gateway" "myapp-igw" {
+    vpc_id = aws_vpc.myaapp-vpc.id 
+    tags = {
+      "Name" = "${var.env_prefix}-igw"
+    }
+}
+  
+resource "aws_route_table_association" "a-rtb-subnet" {
+    subnet_id = aws_subnet.myapp-subnet-1.id
+    route_table_id = aws_route_table.myapp-route-table.id
+  
+}  
 
-output "vpc_id" {
-    value = aws_vpc.development-vpc.id
+resource "aws_security_group" "myapp-sg" {
+    name = "myapp-sg"
+    vpc_id = aws_vpc.myaapp-vpc.id
+
+    ingress  {
+      cidr_blocks = [var.my_ip]
+      description = "allow ssh from my ip"
+      from_port = 22 
+      protocol = "tcp"
+      to_port = 22
+    } 
+
+    ingress {
+      cidr_blocks = ["0.0.0.0/0"]
+      description = "allow http from internet"
+      from_port = 8080 
+      protocol = "tcp"
+      to_port = 8080
+    } 
+    
+    egress {
+      cidr_blocks = ["0.0.0.0/0"]
+      from_port = 0 
+      protocol = "-1"
+      to_port = 0
+    } 
+   
+   tags = {
+      "Name" = "${var.env_prefix}-sg"
+    }
+
+
 }
 
-output "dev-subney-id" {
-    value = aws_subnet.dev-subnet-1.id
+data "aws_ami" "latest-amazon-linux-image" {
+    most_recent = true 
+    owners = ["amazon"]
+    filter {
+        name = "name"
+        values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    }
+}
+#utput "amzon_ami_id" {
+#   value = data.aws_ami.latest-amazon-linux-image.id
+# 
+#}
+
+resource "aws_instance" "myapp-server" {
+    ami = data.aws_ami.latest-amazon-linux-image.id
+    instance_type = var.instance_type
+    subnet_id = aws_subnet.myapp-subnet-1.id
+    vpc_security_group_ids = [aws_security_group.myapp-sg.id] 
+    associate_public_ip_address = true 
+    key_name = "terraform"
+
+    user_data = <<EOF
+                    #!/bin/bash
+                    sudo yum update - && sudo yum install -y docker
+                    sudo systemctl start docker
+                    sudo usermod -aG docker ec2-user
+                    docker run -p 8080:80 nginx
+                EOF
+    tags = {
+      "Name" = "${var.env_prefix}-server"
+    }
 }

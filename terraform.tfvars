@@ -1,5 +1,6 @@
-    environment = "development"
-    cidr_blocks = [
-        {cidr_block = "10.0.0.0/16", name = "development"},
-        {cidr_block = "10.0.30.0/24", name = "dev-subnet"}
-    ]
+   vpc_cidr_block = "10.0.0.0/16"
+   subnet_cidr_block = "10.0.10.0/24"
+   env_prefix = "dev"
+   avail_zone = "eu-west-3b"
+   my_ip = "165.50.69.119/32"
+   instance_type = "t2.micro"
